@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: <APP_NAME>
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: <APP_NAME>
+  template:
+    metadata:
+      annotations:
+        vault.hashicorp.com/agent-inject: 'true'
+        vault.hashicorp.com/auth-path: auth/<SVC_ACCOUNT>
+        vault.hashicorp.com/role: '<SVC_ACCOUNT>'
+        vault.hashicorp.com/agent-pre-populate: "false"
+
+        # vault.hashicorp.com/agent-inject-secret-.env: '<SVC_ACCOUNT>/data/<APP_FULL_NAME>/env'
+        # vault.hashicorp.com/agent-inject-template-.env: |
+        #   {{- with secret "<SVC_ACCOUNT>/data/<APP_FULL_NAME>/env" -}}{{- range $k, $v := .Data.data -}}
+        #   export {{ $k }}={{ $v }}
+        #   {{ end }}{{ end }}
+
+        # vault.hashicorp.com/agent-inject-secret-default.conf: '<SVC_ACCOUNT>/data/<APP_FULL_NAME>/default.conf'
+        # vault.hashicorp.com/secret-volume-path-default.conf: '/etc/nginx/conf.d'
+        # vault.hashicorp.com/agent-inject-template-default.conf: |
+        #   {{- with secret "<SVC_ACCOUNT>/data/<APP_FULL_NAME>/default.conf" -}}
+        #   {{ .Data.data.content }}
+        #   {{- end -}}
+      labels:
+        app: <APP_NAME>
+    spec:
+      serviceAccountName: <SVC_ACCOUNT>
+      containers:
+        - name: <APP_NAME>
+          image: simlabsti/<IMAGE>
+          imagePullPolicy: Always
+          resources:
+            limits:
+              memory: "<MEM>Mi"
+              cpu: "<CPU>m"
+            requests:
+              memory: "64Mi"
+              cpu: "25m"
+          ports:
+            - containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /<APP_PATH>
+              port: 8080
+            initialDelaySeconds: 20
+            timeoutSeconds: 30
+            periodSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /<APP_PATH>
+              port: 8080
+            initialDelaySeconds: 20
+            timeoutSeconds: 30
+            periodSeconds: 10
+            failureThreshold: 5
+      #tolerations:
+      #- key: instance_type
+      #  value: <SPOT>
+      #  effect: NoSchedule
+      #  operator: Equal
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: role
+                    operator: In
+                    values:
+                      - <ROLE>
+      imagePullSecrets:
+        - name: secret-registry

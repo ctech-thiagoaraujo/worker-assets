@@ -1,0 +1,54 @@
+name: Build and Push
+
+on:
+  workflow_call:
+    inputs:
+      branch_name:
+        required: true
+        type: string
+      short_branch_name:
+        required: true
+        type: string
+      project_name:
+        required: true
+        type: string
+      app_name:
+        required: true
+        type: string
+      short_sha:
+        required: true
+        type: string
+
+    outputs:
+      image_tag: 
+        value: ${{ inputs.app_name }}-${{ inputs.short_branch_name }}:${{ inputs.short_sha }}
+
+jobs:
+  Build_Push:
+    runs-on: ubuntu-latest
+
+    steps:    
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.branch_name }}
+          path: ${{ inputs.project_name }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: DockerHub Login
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and Push
+        uses: docker/build-push-action@v3
+        with:
+          context: ${{ inputs.project_name }}/${{ inputs.app_name }}
+          push: true
+          tags: simlabsti/${{ inputs.app_name }}-${{ inputs.short_branch_name }}:${{ inputs.short_sha }}

@@ -1,0 +1,45 @@
+name: Monorepo CD
+
+on: 
+  push:
+    branches:
+      - "develop"
+      - "main"
+  workflow_dispatch:
+
+jobs:
+  checkout:
+    runs-on: ubuntu-latest
+
+    outputs:
+      api-<NOME>: ${{ steps.api-<NOME>.outputs.changed }} #TODO alterar o <NOME> para o nome da API (minusculo)
+      branchname: ${{ steps.branch-name.outputs.current_branch }}
+
+    steps:
+      - name: Get branch name
+        id: branch-name
+        uses: tj-actions/branch-names@v5
+
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.branch-name.outputs.current_branch }}
+
+      - uses: marceloprado/has-changed-path@v1
+        id: api-<NOME> #TODO alterar o <NOME> para o nome da API (minusculo)
+        with:
+          paths: api-<NOME> #TODO alterar o <NOME> para o nome da API (minusculo)
+
+  API-<NOME>: #TODO alterar o <NOME> para o nome da API (maiusculo)
+    needs: checkout
+    name: API-<NOME> #TODO alterar o <NOME> para o nome da API (maiusculo)
+    uses: ./.github/workflows/build-deploy.yaml
+    with:
+      branchname: ${{ needs.checkout.outputs.branchname }}
+      apiname: "api-<NOME>" #TODO alterar o <NOME> para o nome da API (minusculo)
+      projectname: "<NOME-PROJETO>" #TODO alterar o <NOME> para o nome do projeto (minusculo)
+      cpu: "250" #TODO alterar o quantidade de CPU desejado para o POD desta aplicação
+      memory: "256" #TODO alterar o quantidade de RAM desejado para o POD desta aplicação
+    secrets: inherit
+    if: ${{ needs.checkout.outputs.api-<NOME> == 'true' }} #TODO alterar o <NOME> para o nome da API (minusculo)
+

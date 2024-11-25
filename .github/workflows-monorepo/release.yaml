@@ -1,0 +1,88 @@
+name: Monorepo CD
+
+on:
+  push:
+    branches:
+      - "release/*"
+  workflow_dispatch:
+
+
+jobs:
+  Checkout:
+    runs-on: ubuntu-latest
+
+    outputs:
+      branch_name: ${{ steps.branch-name.outputs.current_branch }}
+      short_branch_name: ${{ env.short_branch_name }}
+      short_sha: ${{ steps.short-sha.outputs.sha }}
+
+    steps:
+      - name: Get branch name
+        id: branch-name
+        uses: tj-actions/branch-names@v7
+
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.branch-name.outputs.current_branch }}
+
+      - uses: benjlevesque/short-sha@v1.2
+        id: short-sha
+        with:
+          length: 7
+
+      - name: Get Branch Short Name
+        id: short-branch-name
+        run: |
+          echo "short_branch_name=$(echo ${{ steps.branch-name.outputs.current_branch }} | cut -c1-3)" >> $GITHUB_ENV
+
+
+  ## Replicat bloco abaixo para a quantidade de aplicações no monorepo (1 pra 1)
+  Build_Push_<app_name>: #TODO Alterar <app_name> para o nome da aplicação que será construída. Ex.: API-Simplifica
+    needs: Checkout    
+    uses: ./.github/workflows/build_push.yaml
+    secrets: inherit    
+    with:
+      branch_name: ${{ needs.Checkout.outputs.branch_name }}
+      short_branch_name: ${{ needs.Checkout.outputs.short_branch_name }}
+      short_sha: ${{ needs.Checkout.outputs.short_sha }}
+      project_name: '<nome>' #TODO Alterar <nome> para o nome do projeto (minúsculo). Ex.: mono-simplifica
+      app_name: '<nome>' #TODO Alterar <nome> para o nome do projeto (minúsculo). Ex.: api-simplifica
+
+
+  ## Replicat bloco abaixo para a quantidade de aplicações no monorepo (1 pra 1)
+  Deploy_SIM_<app_name>: #TODO Alterar <app_name> para o nome da aplicação que será construída. Ex.: API-Simplifica:
+    needs: [Checkout, Build_Push_<app_name>] #TODO Alterar <app_name> para o nome da aplicação que será construída. Ex.: API-Simplifica
+    uses: ./.github/workflows/deploy_cluster.yaml
+    secrets: inherit
+    with:
+      image_tag: ${{ needs.Build_Push_<app_name>.outputs.image_tag }} #TODO Alterar <app_name> para o nome da aplicação que será construída. Ex.: API-Simplifica
+      company: 'sim'
+      branch_name: ${{ needs.Checkout.outputs.branch_name }}
+      short_branch_name: ${{ needs.Checkout.outputs.short_branch_name }}
+      app_name: '<nome>' #TODO Alterar <nome> para o nome do projeto (minúsculo). Ex.: api-simplifica
+      app_path: '<path>' #TODO Alterar <path> para o path da aplicação. 
+      cpu: '250' #TODO Alterar a quantidade de CPU desejada para o POD.
+      mem: '256' #TODO Alterar a quantidade de RAM desejada para o POD.
+      min_rep: 1 #TODO Determina o número mínimo de réplicas que estarão aplicadas no HPA dos 3 ambientes, caso de HPA_STG=true, se FALSE, Dev e Stg = 1 e Prd = MIN_REP
+      max_rep: 3 #TODO Determina o número máximo de réplicas que estarão aplicadas no HPA nos 3 ambientes, caso de HPA_STG=true, se FALSE, Dev e Stg = 1 e Prd = MAX_REP
+      hpa_stg: false #TODO Alterar ativação ou não do HPA em Dev e QA, Produção usa por padrão o HPA.
+
+  
+  ## Replicat bloco abaixo para a quantidade de aplicações no monorepo (1 pra 1)
+  Deploy_Charrua_<app_name>: #TODO Alterar <app_name> para o nome da aplicação que será construída. Ex.: API-Simplifica
+    needs: [Checkout, Build_Push_<app_name>] #TODO Alterar <app_name> para o nome da aplicação que será construída. Ex.: API-Simplifica
+    uses: ./.github/workflows/deploy_cluster.yaml
+    secrets: inherit
+    with:
+      image_tag: ${{ needs.Build_Push_<app_name>.outputs.image_tag }} #TODO Alterar <app_name> para o nome da aplicação que será construída. Ex.: API-Simplifica
+      company: '<company>' #TODO Alterar <company> para o nome da empresa que receberá a aplicação
+      branch_name: ${{ needs.Checkout.outputs.branch_name }}
+      short_branch_name: ${{ needs.Checkout.outputs.short_branch_name }}
+      app_name: '<nome>' #TODO Alterar <nome> para o nome do projeto (minúsculo). Ex.: api-simplifica
+      app_path: '<path>' #TODO Alterar <path> para o path da aplicação. 
+      cpu: '250' #TODO Alterar a quantidade de CPU desejada para o POD.
+      mem: '256' #TODO Alterar a quantidade de RAM desejada para o POD.
+      min_rep: 1 #TODO Determina o número mínimo de réplicas que estarão aplicadas no HPA dos 3 ambientes, caso de HPA_STG=true, se FALSE, Dev e Stg = 1 e Prd = MIN_REP
+      max_rep: 3 #TODO Determina o número máximo de réplicas que estarão aplicadas no HPA nos 3 ambientes, caso de HPA_STG=true, se FALSE, Dev e Stg = 1 e Prd = MAX_REP
+      hpa_stg: false #TODO Alterar ativação ou não do HPA em Dev e QA, Produção usa por padrão o HPA.

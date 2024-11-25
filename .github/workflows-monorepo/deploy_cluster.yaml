@@ -1,0 +1,167 @@
+name: Deploy to Cluster
+
+on:
+  workflow_call:
+    inputs:
+      hpa_stg:
+        required: true
+        type: boolean
+      min_rep:
+        required: true
+        type: number
+      max_rep:
+        required: true
+        type: number
+      cpu:
+        required: true
+        type: string
+      mem:
+        required: true
+        type: string
+      image_tag:
+        required: true
+        type: string
+      branch_name:
+        required: true
+        type: string
+      short_branch_name:
+        required: true
+        type: string
+      app_name:
+        required: true
+        type: string
+      app_path:
+        required: false
+        type: string
+        default: "none"
+      company:
+        required: true
+        type: string
+
+jobs:
+  Deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.branch_name }}
+          path: ${{ inputs.app_name }}
+
+      - name: Determine Environment Variables
+        id: environment-vars
+        run: |
+          if [ ${{ inputs.short_branch_name }} = 'dev' ] ; then echo "ns=dev" >> $GITHUB_ENV; fi
+          if [ ${{ inputs.short_branch_name }} = 'rel' ] ; then echo "ns=qa" >> $GITHUB_ENV; fi
+          if [ ${{ inputs.short_branch_name }} = 'mai' ] ; then echo "ns=main" >> $GITHUB_ENV; fi
+          if [ ${{ inputs.hpa_stg == true }} ] ; then echo "min_replicas=${{ inputs.min_rep }}" >> $GITHUB_ENV; fi
+          if [ ${{ inputs.hpa_stg == true }} ] ; then echo "max_replicas=${{ inputs.max_rep }}" >> $GITHUB_ENV; fi
+          if [ ${{ inputs.hpa_stg == false }} ] ; then echo "min_replicas=1" >> $GITHUB_ENV; fi
+          if [ ${{ inputs.hpa_stg == false }} ] ; then echo "max_replicas=1" >> $GITHUB_ENV; fi
+          echo "app_name=$(echo ${{ inputs.app_name }} | tr -d '-')" >> $GITHUB_ENV
+          echo "kube_config_sim=${{ secrets.SIMLABS_KUBE_CONFIG_DATA }}" >> $GITHUB_ENV
+          echo "kube_config_charrua=${{ secrets.CHARRUA_KUBE_CONFIG_DATA }}" >> $GITHUB_ENV
+          echo "app_dir=${{ inputs.app_name }}/${{ inputs.app_name }}" >> $GITHUB_ENV
+
+      - name: Change Deploy
+        shell: bash
+        run: |
+          sed -i "s/<APP_NAME>/${{ env.app_name }}/g" ${{ env.app_dir }}/K8S/deployment.yaml
+          sed -i "s/<APP_FULL_NAME>/${{ inputs.app_name }}/g" ${{ env.app_dir }}/K8S/deployment.yaml
+          sed -i "s/<APP_PATH>/${{ inputs.app_path }}/g" ${{ env.app_dir }}/K8S/deployment.yaml
+          sed -i "s/<IMAGE>/${{ inputs.image_tag }}/g" ${{ env.app_dir }}/K8S/deployment.yaml
+          sed -i "s/<CPU>/${{ inputs.cpu }}/g" ${{ env.app_dir }}/K8S/deployment.yaml
+          sed -i "s/<MEM>/${{ inputs.mem }}/g" ${{ env.app_dir }}/K8S/deployment.yaml
+          sed -i "s/<HPA>/hpa-${{ env.app_name }}/g" ${{ env.app_dir }}/K8S/hpa.yaml
+          sed -i "s/<NAME>/${{ env.app_name }}/g" ${{ env.app_dir }}/K8S/hpa.yaml
+          sed -i "s/<CPU>/$(echo $((${{ inputs.cpu }}*51/100)))/g" ${{ env.app_dir }}/K8S/hpa.yaml
+          sed -i "s/<MEM>/$(echo $((${{ inputs.mem }}*1024*1024*80/100)))/g" ${{ env.app_dir }}/K8S/hpa.yaml
+          sed -i "s/<APP_NAME>/${{ env.app_name }}/g" ${{ env.app_dir }}/K8S/service.yaml
+          if [ ${{ inputs.short_branch_name }} = 'dev' ] ; then sed -i "s/<ROLE>/dev/g" ${{ env.app_dir }}/K8S/deployment.yaml ; sed -i "s/#//g" ${{ env.app_dir }}/K8S/deployment.yaml; sed -i "s/<SVC_ACCOUNT>/dev-${{ inputs.company }}/g" ${{ env.app_dir }}/K8S/deployment.yaml ; sed -i "s/<SPOT>/${{ secrets.TOLERATION_DEV }}/g" ${{ env.app_dir }}/K8S/deployment.yaml ; fi
+          if [ ${{ inputs.short_branch_name }} = 'rel' ] ; then sed -i "s/<ROLE>/qa/g" ${{ env.app_dir }}/K8S/deployment.yaml ; sed -i "s/#//g" ${{ env.app_dir }}/K8S/deployment.yaml; sed -i "s/<SVC_ACCOUNT>/qa-${{ inputs.company }}/g" ${{ env.app_dir }}/K8S/deployment.yaml ; sed -i "s/<SPOT>/${{ secrets.TOLERATION_QA }}/g" ${{ env.app_dir }}/K8S/deployment.yaml ; fi
+          if [ ${{ inputs.short_branch_name }} = 'mai' ] ; then sed -i "s/<ROLE>/main/g" ${{ env.app_dir }}/K8S/deployment.yaml ; sed -i "s/<SVC_ACCOUNT>/main-${{ inputs.company }}/g" ${{ env.app_dir }}/K8S/deployment.yaml ; fi
+
+
+      ## DEPLOY CLUSTER SIM
+
+      - name: Deploy to Cluster SIM
+        if: ${{ inputs.company == 'sim' }}
+        uses: wahyd4/kubectl-helm-action@master
+        env:
+          KUBE_CONFIG_DATA: ${{ env.kube_config_sim }}
+        with:
+          args: |
+            kubectl apply -f ${{ env.app_dir}}/K8S/ -n ${{ env.ns }} --request-timeout="800"
+
+      - name: Deploy HPA Prd SIM
+        if: ${{ inputs.company == 'sim' && inputs.short_branch_name == 'mai' }}
+        uses: wahyd4/kubectl-helm-action@master
+        env:
+          KUBE_CONFIG_DATA: ${{ env.kube_config_sim }}
+        with:
+          args: |
+            kubectl patch hpa -n ${{ env.ns }} hpa-${{ env.app_name }} -p '{\"spec\":{\"maxReplicas\": ${{ env.max_rep }}}}' --request-timeout="800"
+            kubectl patch hpa -n ${{ env.ns }} hpa-${{ env.app_name }} -p '{\"spec\":{\"minReplicas\": ${{ env.min_rep }}}}' --request-timeout="800"
+
+      - name: Deploy HPA Stg SIM
+        if: ${{ inputs.company == 'sim' && inputs.short_branch_name == 'rel' && inputs.hpa_stg == 'true' }}
+        uses: wahyd4/kubectl-helm-action@master
+        env:
+          KUBE_CONFIG_DATA: ${{ env.kube_config_sim }}
+        with:
+          args: |
+            kubectl patch hpa -n ${{ env.ns }} hpa-${{ env.app_name }} -p '{\"spec\":{\"maxReplicas\": ${{ env.max_replicas }}}}' --request-timeout="800"
+            kubectl patch hpa -n ${{ env.ns }} hpa-${{ env.app_name }} -p '{\"spec\":{\"minReplicas\": ${{ env.min_replicas }}}}' --request-timeout="800"
+
+      - name: Delete HPA Stg SIM
+        if: ${{ inputs.company == 'sim' && inputs.short_branch_name == 'rel' && inputs.hpa_stg == 'false' }}
+        uses: wahyd4/kubectl-helm-action@master
+        env:
+          KUBE_CONFIG_DATA: ${{ env.kube_config_sim }}
+        with:
+          args: |
+            kubectl patch hpa -n ${{ env.ns }} hpa-${{ env.app_name }} -p '{\"spec\":{\"minReplicas\": ${{ env.min_replicas }}}}' --request-timeout="800"
+            kubectl patch hpa -n ${{ env.ns }} hpa-${{ env.app_name }} -p '{\"spec\":{\"maxReplicas\": ${{ env.max_replicas }}}}' --request-timeout="800"
+
+
+      ## DEPLOY CLUSTER CHARRUA
+
+      - name: Deploy to Cluster Charrua
+        if: ${{ inputs.company == 'charrua' && inputs.short_branch_name != 'dev' }}
+        uses: wahyd4/kubectl-helm-action@master
+        env:
+          KUBE_CONFIG_DATA: ${{ env.kube_config_charrua }}
+        with:
+          args: |
+            kubectl apply -f ${{ env.app_dir}}/K8S/ -n ${{ env.ns }} --request-timeout="800"
+
+      - name: Deploy HPA Prd Charrua
+        if: ${{ inputs.company == 'charrua' && inputs.short_branch_name == 'mai' }}
+        uses: wahyd4/kubectl-helm-action@master
+        env:
+          KUBE_CONFIG_DATA: ${{ env.kube_config_charrua }}
+        with:
+          args: |
+            kubectl patch hpa -n ${{ env.ns }} hpa-${{ env.app_name }} -p '{\"spec\":{\"maxReplicas\": ${{ env.max_rep }}}}' --request-timeout="800"
+            kubectl patch hpa -n ${{ env.ns }} hpa-${{ env.app_name }} -p '{\"spec\":{\"minReplicas\": ${{ env.min_rep }}}}' --request-timeout="800"
+
+      - name: Deploy HPA Stg Charrua
+        if: ${{ inputs.company == 'charrua' && inputs.short_branch_name == 'rel' && env.HPA_STG == 'true' }}
+        uses: wahyd4/kubectl-helm-action@master
+        env:
+          KUBE_CONFIG_DATA: ${{ env.kube_config_charrua }}
+        with:
+          args: |
+            kubectl patch hpa -n ${{ env.ns }} hpa-${{ env.app_name }} -p '{\"spec\":{\"maxReplicas\": ${{ env.max_replicas }}}}' --request-timeout="800"
+            kubectl patch hpa -n ${{ env.ns }} hpa-${{ env.app_name }} -p '{\"spec\":{\"minReplicas\": ${{ env.min_replicas }}}}' --request-timeout="800"
+
+      - name: Delete HPA Stg Charrua
+        if: ${{ inputs.company == 'charrua' && inputs.short_branch_name == 'rel' && env.HPA_STG == 'false' }}
+        uses: wahyd4/kubectl-helm-action@master
+        env:
+          KUBE_CONFIG_DATA: ${{ env.kube_config_charrua }}
+        with:
+          args: |
+            kubectl patch hpa -n ${{ env.ns }} hpa-${{ env.app_name }} -p '{\"spec\":{\"minReplicas\": ${{ env.min_replicas }}}}' --request-timeout="800"
+            kubectl patch hpa -n ${{ env.ns }} hpa-${{ env.app_name }} -p '{\"spec\":{\"maxReplicas\": ${{ env.max_replicas }}}}' --request-timeout="800"
