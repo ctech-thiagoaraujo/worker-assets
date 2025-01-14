@@ -10,6 +10,7 @@ Pastas:
 
 ### Padrão de entrega de APIs
 
+
 Esse padrão pode ser seguido em todas linguagens.
 
 ## Endpoint de Health
